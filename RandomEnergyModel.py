@@ -146,7 +146,7 @@ for t in xrange(0,averaging_time):
     for i,m in enumerate(results.minima):
         averages_min[i]["path"] = averages_min[i]["path"] + m["path"]
     for m in averages_min:
-        m["path"] = m["path"] 
+        m["path"] = m["path"]
 
     for i,m in enumerate(results.maxima):
         averages_max[i]["path"] = averages_max[i]["path"] + m["path"]
@@ -181,7 +181,7 @@ print "________"
 # plt.fill_between(X, max_y, new_line_max, where=max_y<=new_line_max, facecolor='yellow', alpha = 0.1, interpolate=True)
 
 plt.axis('off')
-plt.savefig("GREM.pdf")
+plt.savefig("../GREM.pdf")
 
 plt.show()
 
