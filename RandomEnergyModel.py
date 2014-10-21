@@ -1,8 +1,8 @@
 __author__ = 'sam.royston'
 import numpy as np
 import matplotlib.pyplot as plt
-from matplotlib.backends.backend_pdf import PdfPages
 import sys
+
 
 from random import random
 
@@ -17,44 +17,48 @@ canvas_width = 1400
 scaling_factor = 1
 start_pos = 0
 mu,sigma = 0, 1
-pp = PdfPages('GREM.pdf')
 
 class PartialTree(object):
     def __init__(self, height, sample_density=0.01, max_samples = 10000):
         # start with a single branch
         self.branch = np.random.normal(mu,sigma,height+1)
         self.branch[0] = 0
-        self.max = {"sum":-1000, "path":self.branch}
-        self.min = {"sum":1000, "path":self.branch}
-        self.max_norm_l1 = {"norm":0, "path":self.branch}
-        self.min_norm_l1 = {"norm":1000000, "path":self.branch}
+        self.max = {"sum":0, "path":self.branch}
+        self.min = {"sum":0, "path":self.branch}
         self.minima = []
         self.maxima = []
         self.max_samples = max_samples
-        for i in xrange (1, DEPTH + 1):
-            self.minima.append({"sum":1000, "path":self.branch})
-            self.maxima.append({"sum":-1000, "path":self.branch})
+        for i in xrange (1, height + 2):
+            self.minima.append({"sum":0, "path":np.zeros(i)})
+            self.maxima.append({"sum":0, "path":np.zeros(i)})
         self.sampling = []
         self.sample_density = sample_density
 
-    def check_minmax(self):
+    def check_minmax(self, density = 1):
         """
         check current branch against past min/max
         """
         i = 1
-        for minimum in self.minima:
+        for minimum in self.minima[::density]:
             range = self.branch[0:i]
             path_sum = np.sum(range)
             if path_sum < minimum["sum"]:
-                self.minima[i - 1] = {"sum":path_sum, "path":np.copy(self.branch[0:i])}
-            i += 1
+                self.minima[i-1] = {"sum":path_sum, "path":np.copy(self.branch[0:i])}
+            i += density
         i = 1
-        for maximum in self.maxima:
+        for maximum in self.maxima[::density]:
             range = self.branch[0:i]
             path_sum = np.sum(range)
             if path_sum > maximum["sum"]:
-                self.maxima[i - 1] = {"sum":path_sum, "path":np.copy(self.branch[0:i])}
-            i += 1
+                self.maxima[i-1] = {"sum":path_sum, "path":np.copy(self.branch[0:i])}
+            i += density
+
+    def pick_at_random(self):
+        """
+        update random selection of branches for viz if needed
+        """
+        if random() < self.sample_density and len(self.sampling) < self.max_samples:
+            self.sampling.append(np.copy(self.branch))
 
     def replace_path_at_height(self,h):
         """
@@ -97,29 +101,25 @@ def permute_branches(height):
     """
     string_state_representation = bin(2**height - 1)
     partial_tree = PartialTree(height)
+
+    ## modify the branch for each path enumerated using the binary representation above
     while int(string_state_representation,2) >= 0:
         new_state_representation = bin(int(string_state_representation,2) - 1)
+
+        ## this trick tells us how far up the branch to replace
         string_indices_to_change = bin(int(new_state_representation,2) ^ int(string_state_representation,2))
         string_state_representation = new_state_representation
+
+        ## how long is the XOR ? ... (- 2) because of '0b' chars in string representation
         deepness = len(string_indices_to_change) - 2
         index = len(partial_tree.branch) - deepness
         partial_tree.branch[index:] = np.random.normal(mu,sigma,deepness)
-        path_sum = np.sum(partial_tree.branch)
-        norm_l1 = np.linalg.norm(partial_tree.branch, ord=1)
 
-        if random() < partial_tree.sample_density and len(partial_tree.sampling) < partial_tree.max_samples:
-            partial_tree.sampling.append(np.copy(partial_tree.branch))
+        ## checks for new extremes ~ costly b/c default param looks for extremes at every level of the tree
         partial_tree.check_minmax()
-        if path_sum > partial_tree.max["sum"]:
-            partial_tree.max = {"sum":path_sum, "path":np.copy(partial_tree.branch)}
-        elif path_sum <= partial_tree.min["sum"]:
-            partial_tree.min = {"sum":path_sum, "path": np.copy(partial_tree.branch)}
-        if norm_l1 < partial_tree.min_norm_l1["norm"]:
-            partial_tree.min_norm_l1 = {"norm":norm_l1, "path": np.copy(partial_tree.branch)}
-        if norm_l1 > partial_tree.max_norm_l1["norm"]:
-            partial_tree.max_norm = {"norm":norm_l1, "path": np.copy(partial_tree.branch)}
 
     return partial_tree
+
 
 
 
@@ -134,55 +134,54 @@ def draw_array(a, color, width = 1, alpha = 0.005):
     plt.plot(x,y,color, linewidth=width, alpha=alpha)
     return x,y
 
-colors = "bgrcmy"
+def take_average(n, depth):
+    """
+    take average values in n independent GREM trials
+    """
+    averages_min = [{"path":np.zeros(i), "sum":0} for i in xrange(1,depth + 2)]
+    averages_max = [{"path":np.zeros(i), "sum":0} for i in xrange(1,depth + 2)]
+    for t in xrange(0,n):
+        c = '\033[92m' if t == n - 1 else '\033[91m'
+        sys.stdout.write("\r" + c + str((t * 1.0/n * 1.0) * 100) + '% \033[0m' )
+        sys.stdout.flush()
+        results = permute_branches(DEPTH)
+        for i,m in enumerate(results.minima):
+            averages_min[i]["path"] = averages_min[i]["path"] + (m["path"] / n)
+        for i,m in enumerate(results.maxima):
+            averages_max[i]["path"] = averages_max[i]["path"] + (m["path"] / n)
+
+    return averages_min, averages_max
+
+## take averages
+_averages_min, _averages_max = take_average(averaging_time, DEPTH)
+
+## draw to matplotlib environment
+"""
+b: blue
+g: green
+r: red
+c: cyan
+m: magenta
+y: yellow
+k: black
+w: white
+
+Gray shades can be given as a string encoding a float in the 0-1 range, e.g.:
+
+color = '0.75'
+For a greater range of colors, you have two options. You can specify the color using an html hex string, as in:
+
+color = '#eeefff'
+"""
+
+colors = "bgrcm"
 col =0
-results = permute_branches(DEPTH)
-averages_min = results.minima
-averages_max = results.maxima
-
-for t in xrange(0,averaging_time):
-    print str((t * 1.0/averaging_time * 1.0) * 100) + "%"
-    results = permute_branches(DEPTH)
-    for i,m in enumerate(results.minima):
-        averages_min[i]["path"] = averages_min[i]["path"] + m["path"]
-    for m in averages_min:
-        m["path"] = m["path"]
-
-    for i,m in enumerate(results.maxima):
-        averages_max[i]["path"] = averages_max[i]["path"] + m["path"]
-    for m in averages_max:
-        m["path"] = m["path"]
-
-for minimum,maximum in zip(averages_min, averages_max):
+for minimum,maximum in zip(_averages_min, _averages_max):
     col += 1
-    col %= 6
-    draw_array(minimum["path"], colors[col] + "-", alpha=0.2)
-    draw_array(maximum["path"], colors[col] +  "-", alpha=0.2)
-
-# for sample in results.sampling:
-#     draw_array(sample,"k-",width=1)
-# plt.plot([0, DEPTH], [0, np.sum(results.max["path"])],"k-", linewidth=3.0, linestyle='dashed')
-# plt.plot([0, DEPTH], [0, np.sum(results.min["path"])],"k-", linewidth=3.0, linestyle='dashed')
-print "________"
-
-
-
-#
-# X,min_y = draw_array(results.min["path"], "k-", alpha=0.3)
-# X,max_y = draw_array(results.max["path"], "k-", alpha=0.3)
-# draw_array(results.min_norm_l1["path"], "r-", alpha=0.8)
-# draw_array(results.max_norm_l1["path"], "b-", alpha=0.8)
-# new_line_min = np.interp(X, [0, DEPTH], [0, np.sum(results.min["path"])])
-# new_line_max = np.interp(X, [0, DEPTH], [0, np.sum(results.max["path"])])
-#
-# plt.fill_between(X, min_y, new_line_min, where=min_y<=new_line_min, facecolor='teal', alpha = 0.1, interpolate=True)
-# plt.fill_between(X, max_y, new_line_max, where=max_y>=new_line_max, facecolor='teal', alpha = 0.1, interpolate=True)
-# plt.fill_between(X, min_y, new_line_min, where=min_y>=new_line_min, facecolor='yellow', alpha = 0.1, interpolate=True)
-# plt.fill_between(X, max_y, new_line_max, where=max_y<=new_line_max, facecolor='yellow', alpha = 0.1, interpolate=True)
-
+    draw_array(minimum["path"], colors[col % len(colors)] + "-", alpha=0.2)
+    draw_array(maximum["path"], colors[col % len(colors)] + "-", alpha=0.2)
 plt.axis('off')
 plt.savefig("../GREM.pdf")
-
 plt.show()
 
 
